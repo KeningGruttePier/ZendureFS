@@ -389,6 +389,6 @@ class ZendureManager(DataUpdateCoordinator[None], EntityDevice):
             _LOGGER.error(err)
             _LOGGER.error(traceback.format_exc())
             
-        def _update_threshold(self, _number: Any, _value: float) -> None:
-        """P1 Threshold or P1 Marge changed — value applied."""
-        pass
+    def _update_threshold(self, _number: Any, _value: float) -> None:
+    """P1 Threshold or P1 Marge changed — value applied."""
+    pass

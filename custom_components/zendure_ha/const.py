@@ -45,3 +45,7 @@ class SmartMode:
     Threshold = 3.5
     P1_MIN_UPDATE = timedelta(milliseconds=400)
     IGNORE_DELTA = 3
+    P1_IMPORT_THRESHOLD = 200
+    P1_IMPORT_MARGE = 5
+    P1_EXPORT_THRESHOLD = 100
+    P1_EXPORT_MARGE = 50

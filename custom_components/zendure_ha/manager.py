@@ -58,6 +58,18 @@ class ZendureManager(DataUpdateCoordinator[None], EntityDevice):
         self.p1meterEvent: Callable[[], None] | None = None
         self.api = Api()
         self.update_count = 0
+        self.p1_import_threshold = ZendureRestoreNumber(self, "p1_import_threshold", self._update_threshold, None, "W", "power", 2000, 0, NumberMode.BOX)
+        self.p1_import_threshold._attr_native_step = 50
+        self.p1_import_threshold._attr_native_value = SmartMode.P1_IMPORT_THRESHOLD
+        self.p1_import_marge = ZendureRestoreNumber(self, "p1_import_marge", self._update_threshold, None, "W", "power", 500, 0, NumberMode.BOX)
+        self.p1_import_marge._attr_native_step = 5
+        self.p1_import_marge._attr_native_value = SmartMode.P1_IMPORT_MARGE
+        self.p1_export_threshold = ZendureRestoreNumber(self, "p1_export_threshold", self._update_threshold, None, "W", "power", 2000, 0, NumberMode.BOX)
+        self.p1_export_threshold._attr_native_step = 50
+        self.p1_export_threshold._attr_native_value = SmartMode.P1_EXPORT_THRESHOLD
+        self.p1_export_marge = ZendureRestoreNumber(self, "p1_export_marge", self._update_threshold, None, "W", "power", 500, 0, NumberMode.BOX)
+        self.p1_export_marge._attr_native_step = 5
+        self.p1_export_marge._attr_native_value = SmartMode.P1_EXPORT_MARGE
 
     async def loadDevices(self) -> None:
         if self.config_entry is None or (data := await Api.Connect(self.hass, dict(self.config_entry.data), True)) is None:
@@ -206,29 +218,33 @@ class ZendureManager(DataUpdateCoordinator[None], EntityDevice):
             match self.operation:
                 case SmartMode.MATCHING:
                     if powerActual < 0:  # update when we are charging
-                        self.update_power(min(0, powerActual + p1), ManagerState.CHARGING)
+                        self.update_power(min(0, powerActual + p1 + int(self.p1_export_marge.asNumber)), ManagerState.CHARGING)
                     elif powerActual > 0:  # update when we are discharging
-                        self.update_power(max(0, powerActual + p1), ManagerState.DISCHARGING)
+                        self.update_power(max(0, powerActual + p1 - int(self.p1_import_marge.asNumber)), ManagerState.DISCHARGING)
+                
                     elif self.zero_idle == datetime.max:  # check if it is the first time we are idle
                         _LOGGER.info(f"Wait {SmartMode.TIMEIDLE} sec for state change p1: {p1}")
-                        self.zero_idle = time + timedelta(seconds=SmartMode.TIMEIDLE)
-                    elif self.zero_idle < time:  # update when we are idle for more than SmartMode.TIMEIDLE seconds
-                        if p1 < -SmartMode.MIN_POWER:
-                            _LOGGER.info(f"Start charging with p1: {p1}")
-                            self.update_power(p1, ManagerState.CHARGING)
+                        self.zero_idle = time + timedelta(seconds=SmartMode.TIMEIDLE)                         
+                    elif self.zero_idle < time:
+                        bw_export = int(self.p1_export_threshold.asNumber) if self.p1_export_threshold.asNumber > 0 else SmartMode.P1_EXPORT_THRESHOLD
+                        bw_import = int(self.p1_import_threshold.asNumber) if self.p1_import_threshold.asNumber > 0 else SmartMode.P1_IMPORT_THRESHOLD
+                        if p1 < -bw_export:
+                            _LOGGER.info(f"Start charging with p1: {p1} (export threshold: -{bw_export}W)")
+                            self.update_power(p1 + int(self.p1_export_marge.asNumber), ManagerState.CHARGING)
                             self.zero_idle = datetime.max
-                        elif p1 >= 0:
-                            _LOGGER.info(f"Start discharging with p1: {p1}")
-                            self.update_power(p1, ManagerState.DISCHARGING)
+                        elif p1 > bw_import:
+                            _LOGGER.info(f"Start discharging with p1: {p1} (import threshold: +{bw_import}W)")
+                            self.update_power(p1 - int(self.p1_import_marge.asNumber), ManagerState.DISCHARGING)
                             self.zero_idle = datetime.max
                         else:
-                            _LOGGER.info(f"Unable to charge/discharge p1: {p1}")
-
+                            _LOGGER.info(f"Within bandwidth p1: {p1} (band: -{bw_export}..+{bw_import}W)")
+            
                 case SmartMode.MATCHING_DISCHARGE:
                     self.update_power(max(0, powerActual + p1), ManagerState.DISCHARGING)
 
                 case SmartMode.MATCHING_CHARGE:
-                    pwr = powerActual + p1 if powerActual < 0 else p1 if p1 < -SmartMode.MIN_POWER else 0
+                    bw_export = int(self.p1_export_threshold.asNumber) if self.p1_export_threshold.asNumber > 0 else SmartMode.P1_EXPORT_THRESHOLD
+                    pwr = powerActual + p1 + int(self.p1_export_marge.asNumber) if powerActual < 0 else p1 if p1 < -bw_export else 0
                     self.update_power(min(0, pwr), ManagerState.CHARGING)
 
                 case SmartMode.MANUAL:
@@ -372,3 +388,7 @@ class ZendureManager(DataUpdateCoordinator[None], EntityDevice):
         except Exception as err:
             _LOGGER.error(err)
             _LOGGER.error(traceback.format_exc())
+            
+        def _update_threshold(self, _number: Any, _value: float) -> None:
+        """P1 Threshold or P1 Marge changed — value applied."""
+        pass
